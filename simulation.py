@@ -1,157 +1,76 @@
 import streamlit as st
 import pandas as pd
-from mesa import Agent, Model
-from mesa.time import RandomActivation
-from mesa.datacollection import DataCollector
-import numpy as np
 import random
 
 # ---------------------------
-# Agent Definitions
+# Simulation Function
 # ---------------------------
-class PersonAgent(Agent):
-    def __init__(self, unique_id, model, income, rent):
-        super().__init__(unique_id, model)
-        self.income = income
-        self.rent = rent
-        self.capital_investment = income * random.uniform(0.0, 0.1)
-        self.universals = 0
-        self.spending_rate = random.uniform(0.5, 0.85)
-        self.universal_spending_propensity = random.uniform(0.4, 0.9)
+def simulate_universal_economy(num_people, num_businesses, num_landlords, num_steps):
+    people = []
+    businesses = []
+    landlords = []
 
-    def step(self):
-        target_ci = self.income * 0.25
-        gap = max(0, target_ci - self.capital_investment)
-        self.universals += gap * 0.5
-        self.spending = self.income * self.spending_rate
-        self.universal_spending = self.spending * self.universal_spending_propensity * 0.2
-        self.universals = max(0, self.universals - self.universal_spending)
+    for _ in range(num_people):
+        income = random.randint(20000, 50000)
+        rent = random.randint(800, 2000)
+        capital = income * random.uniform(0.0, 0.1)
+        target_capital = income * 0.25
+        gap = max(0, target_capital - capital)
+        universals = gap * 0.5
+        spending = income * random.uniform(0.5, 0.85)
+        universal_spending = spending * random.uniform(0.4, 0.9) * 0.2
+        wealth = capital + universals
 
-class BusinessAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-        self.annual_revenue = random.randint(100000, 300000)
-        self.capitalization = self.annual_revenue * random.uniform(0.05, 0.15)
-        self.accepts_universals = True
-        self.universals_received = 0
+        people.append({
+            "Income": income,
+            "Rent": rent,
+            "Capital": capital,
+            "Universals": universals,
+            "Spending": spending,
+            "Universal_Spending": universal_spending,
+            "Wealth": wealth
+        })
 
-    def step(self):
-        universal_income = random.randint(100, 1000)
-        self.universals_received += universal_income
+    for _ in range(num_businesses):
+        annual_revenue = random.randint(100000, 300000)
+        universals_received = random.randint(100, 1000) * num_steps
+        businesses.append({
+            "Annual_Revenue": annual_revenue,
+            "Universals_Received": universals_received
+        })
 
-class LandlordAgent(Agent):
-    def __init__(self, unique_id, model):
-        super().__init__(unique_id, model)
-        self.monthly_rent_collected = 0
-        self.reinvestment_rate = random.uniform(0.05, 0.3)
+    for _ in range(num_landlords):
+        monthly_rent = random.randint(10000, 30000)
+        total_rent = monthly_rent * num_steps
+        landlords.append({
+            "Total_Rent": total_rent
+        })
 
-    def step(self):
-        self.monthly_rent_collected = random.randint(10000, 30000)
-        self.local_reinvestment = self.monthly_rent_collected * self.reinvestment_rate
-
-# ---------------------------
-# Model Definition
-# ---------------------------
-class HarlemModel(Model):
-    def __init__(self, num_people, num_businesses, num_landlords):
-        self.schedule = RandomActivation(self)
-
-        for i in range(num_people):
-            income = random.randint(20000, 50000)
-            rent = random.randint(800, 2000)
-            agent = PersonAgent(i, self, income, rent)
-            self.schedule.add(agent)
-
-        for i in range(num_businesses):
-            business = BusinessAgent(i + num_people, self)
-            self.schedule.add(business)
-
-        for i in range(num_landlords):
-            landlord = LandlordAgent(i + num_people + num_businesses, self)
-            self.schedule.add(landlord)
-
-        self.datacollector = DataCollector(
-            model_reporters={
-                "Total_Universals": self.total_universals,
-                "Gini_Income": self.gini_income,
-                "Gini_Wealth": self.gini_wealth,
-                "Total_Rent": self.total_rent_collected,
-                "Avg_Business_Growth": self.avg_business_growth
-            },
-            agent_reporters={
-                "Income": lambda a: getattr(a, 'income', None),
-                "Capital": lambda a: getattr(a, 'capital_investment', None),
-                "Universals": lambda a: getattr(a, 'universals', None),
-                "Spending": lambda a: getattr(a, 'spending', None),
-                "Universal_Spending": lambda a: getattr(a, 'universal_spending', None),
-                "Rent": lambda a: getattr(a, 'rent', None)
-            }
-        )
-
-    def total_universals(self):
-        return sum([getattr(a, 'universals', 0) for a in self.schedule.agents if hasattr(a, 'universals')])
-
-    def total_rent_collected(self):
-        return sum([getattr(a, 'rent', 0) for a in self.schedule.agents if hasattr(a, 'rent')])
-
-    def gini_income(self):
-        incomes = [a.income for a in self.schedule.agents if hasattr(a, 'income')]
-        return self.gini(incomes)
-
-    def gini_wealth(self):
-        wealths = [getattr(a, 'capital_investment', 0) + getattr(a, 'universals', 0) for a in self.schedule.agents if hasattr(a, 'capital_investment')]
-        return self.gini(wealths)
-
-    def avg_business_growth(self):
-        growth = [a.universals_received for a in self.schedule.agents if hasattr(a, 'universals_received')]
-        return np.mean(growth) if growth else 0
-
-    def gini(self, x):
-        if len(x) == 0:
-            return 0
-        x = sorted(x)
-        n = len(x)
-        cumulative = np.cumsum(x)
-        gini_index = (2 * sum((i + 1) * x[i] for i in range(n)) / (n * sum(x))) - (n + 1) / n
-        return gini_index
-
-    def step(self):
-        self.datacollector.collect(self)
-        self.schedule.step()
+    return pd.DataFrame(people), pd.DataFrame(businesses), pd.DataFrame(landlords)
 
 # ---------------------------
 # Streamlit Interface
 # ---------------------------
-st.set_page_config(page_title="Harlem Economic Simulation", layout="wide")
-st.title("Universal Capital Simulation – Harlem Model")
+st.set_page_config(page_title="Simple Universal Economy Simulation", layout="wide")
+st.title("Universal Capital Redistribution – Minimal Simulation")
 
 num_people = st.sidebar.slider("Number of residents", 100, 1000, 500)
 num_businesses = st.sidebar.slider("Number of businesses", 10, 200, 100)
 num_landlords = st.sidebar.slider("Number of landlords", 1, 20, 10)
 num_steps = st.sidebar.slider("Simulation steps (e.g., months)", 1, 50, 12)
 
-model = HarlemModel(num_people, num_businesses, num_landlords)
-for _ in range(num_steps):
-    model.step()
+people_df, business_df, landlord_df = simulate_universal_economy(
+    num_people, num_businesses, num_landlords, num_steps
+)
 
-agent_df = model.datacollector.get_agent_vars_dataframe().reset_index()
-model_df = model.datacollector.get_model_vars_dataframe().reset_index()
+st.subheader("Resident Summary")
+st.dataframe(people_df.sort_values("Universals", ascending=False))
 
-st.subheader("Total Universals Issued Over Time")
-st.line_chart(model_df.set_index("Step")["Total_Universals"])
+st.subheader("Business Summary")
+st.dataframe(business_df)
 
-st.subheader("Gini Coefficients")
-st.write("**Income Inequality** (0 = perfect equality, 1 = perfect inequality):", round(model_df["Gini_Income"].iloc[-1], 3))
-st.write("**Wealth Inequality (including universals)**:", round(model_df["Gini_Wealth"].iloc[-1], 3))
+st.subheader("Landlord Summary")
+st.dataframe(landlord_df)
 
-st.subheader("Final Agent Data Snapshot")
-final_agents = agent_df.groupby("AgentID").last().sort_values("Universals", ascending=False)
-st.dataframe(final_agents)
-
-st.subheader("Universal Spending Potential Distribution")
-st.bar_chart(final_agents["Universal_Spending"].fillna(0))
-
-st.subheader("Business Growth from Universals")
-st.write("Average universals received by businesses:", round(model_df["Avg_Business_Growth"].iloc[-1], 2))
-
-st.caption("This simulation models a Harlem-like neighborhood with residents, businesses, and landlords, quantifying inequality, capital access, and the systemic effect of universal capital redistribution.")
+st.subheader("Universal Spending Distribution")
+st.bar_chart(people_df["Universal_Spending"])
